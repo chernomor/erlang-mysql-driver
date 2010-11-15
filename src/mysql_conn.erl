@@ -77,7 +77,8 @@
 	 execute/5,
 	 execute/6,
 	 transaction/3,
-	 transaction/4
+	 transaction/4,
+	 quit/2
 	]).
 
 %% private exports to be called only from the 'mysql' module
@@ -108,6 +109,7 @@
 	 }).
 
 -define(SECURE_CONNECTION, 32768).
+-define(MYSQL_QUIT_OP, 1).
 -define(MYSQL_QUERY_OP, 3).
 -define(DEFAULT_STANDALONE_TIMEOUT, 5000).
 -define(MYSQL_4_0, 40). %% Support for MySQL 4.0.x
@@ -208,6 +210,9 @@ post_start(Pid, LogFun) ->
 %%           Rows      = list() of [string()]
 %%           Reason    = term()
 %%--------------------------------------------------------------------
+quit(Pid, From) ->
+    send_msg(Pid, {quit, From}, From, ?DEFAULT_STANDALONE_TIMEOUT).
+
 fetch(Pid, Queries, From) ->
     fetch(Pid, Queries, From, ?DEFAULT_STANDALONE_TIMEOUT).
 
@@ -375,6 +380,9 @@ loop(State) ->
     RecvPid = State#state.recv_pid,
     LogFun = State#state.log_fun,
     receive
+	{quit, From} ->
+		send_reply(From, do_quit(State));
+		%loop(State);
 	{fetch, Queries, From} ->
 	    send_reply(From, do_queries(State, Queries)),
 	    loop(State);
@@ -419,6 +427,25 @@ send_reply(GenSrvFrom, Res) when is_pid(GenSrvFrom) ->
     GenSrvFrom ! {fetch_result, self(), Res};
 send_reply(GenSrvFrom, Res) ->
     gen_server:reply(GenSrvFrom, Res).
+
+do_quit(State) ->
+    do_quit(State#state.socket,
+	       State#state.recv_pid,
+	       State#state.log_fun
+	      ).
+
+do_quit(Sock, RecvPid, LogFun) ->
+    ?Log2(LogFun, debug, "do_quit (id ~p)", [RecvPid]),
+    Packet =  <<?MYSQL_QUIT_OP>>,
+    case do_send(Sock, Packet, 0, LogFun) of
+	ok ->
+		ok;
+	{error, Reason} ->
+	    Msg = io_lib:format("Failed sending QUIT "
+				"on socket : ~p",
+				[Reason]),
+	    {error, Msg}
+    end.
 
 do_query(State, Query) ->
     do_query(State#state.socket,
