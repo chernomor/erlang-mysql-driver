@@ -63,7 +63,9 @@
 %%           Socket  = term(), gen_tcp socket
 %%           Reason  = atom() | string()
 %%--------------------------------------------------------------------
-start_link(Host, Port, LogFun, Parent) when is_list(Host), is_integer(Port) ->
+start_link(Host, Port, LogFun, Parent)
+	when is_list(Host), is_integer(Port); is_tuple(Host), is_integer(Port) ->
+
     RecvPid =
 	spawn_link(fun () ->
 			   init(Host, Port, LogFun, Parent)
