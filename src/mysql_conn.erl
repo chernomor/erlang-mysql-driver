@@ -289,7 +289,9 @@ do_fetch(Pid, Queries, From, Timeout) ->
 
 send_msg(Pid, Msg, From, Timeout) ->
     Self = self(),
-    Pid ! Msg,
+
+	try Pid ! Msg catch error:badarg -> {error, connection_died} end,
+
     case From of
 	Self ->
 	    %% We are not using a mysql_dispatcher, await the response
