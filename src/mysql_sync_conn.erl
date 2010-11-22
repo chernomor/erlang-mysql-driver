@@ -38,7 +38,7 @@
 init(Host, Port, User, Password, Database, LogFun, Encoding) ->
 	case mysql_sync_recv:start_link(Host, Port, LogFun) of
 	{ok, Conn} ->
-		io:format("init:Connect: ~p~n", [Conn]),
+		%io:format("init:Connect: ~p~n", [Conn]),
 		case mysql_init(Conn, User, Password) of
 		{ok, Conn2} ->
 			Db = iolist_to_binary(Database),
@@ -63,8 +63,8 @@ init(Host, Port, User, Password, Database, LogFun, Encoding) ->
 				end,
 				{ok, Conn5}
 			end;
-		{error, Reason} ->
-			{error, Reason}
+		{error, Code, Reason} ->
+			{error, Code, Reason}
 		end;
 	E ->
 		?Log2(LogFun, error,
@@ -107,11 +107,11 @@ quit(Conn) ->
     case do_send(Conn#connect{ seqnum = 0}, Packet) of
 	{ok, Conn2} ->
 		{ok, Conn2};
-	{error, Reason} ->
+	{error, Code, Reason} ->
 	    Msg = io_lib:format("Failed sending QUIT "
 				"on socket : ~p",
 				[Reason]),
-	    {error, Msg}
+	    {error, Code,  Msg}
     end.
 
 
@@ -132,10 +132,10 @@ mysql_init(Conn, User, Password) ->
 			AuthRes =
 			case Caps band ?SECURE_CONNECTION of
 				?SECURE_CONNECTION ->
-					io:format("do mysql_sync_auth:do_new_auth~n"),
+					%io:format("do mysql_sync_auth:do_new_auth~n"),
 					mysql_sync_auth:do_new_auth(Conn2, User, Password, Salt1, Salt2);
 				_ ->
-					io:format("do mysql_sync_auth:do_old_auth~n"),
+					%io:format("do mysql_sync_auth:do_old_auth~n"),
 					mysql_sync_auth:do_old_auth( Conn2, User, Password, Salt1)
 			end,
 			?Log2(LogFun, debug, "AuthRes: ~p", [AuthRes]),
@@ -158,8 +158,8 @@ mysql_init(Conn, User, Password) ->
 					{error, Code, Reason}
 					end
 			end;
-	{error, Reason} ->
-		{error, Reason}
+	{error, Code, Reason} ->
+		{error, Code, Reason}
 	end.
 
 do_recv(Conn) ->
@@ -179,8 +179,12 @@ do_send(Conn, Packet) when is_binary(Packet) ->
 	?Log2(LogFun, debug, "do_send: ~p~nConnect: ~p", [Packet, Conn]),
 
     Data = <<(size(Packet)):24/little, (Conn#connect.seqnum):8, Packet/binary>>,
-    ok = gen_tcp:send(Conn#connect.socket, Data),
-	{ok, Conn#connect{ seqnum = Conn#connect.seqnum + 1} }.
+    case gen_tcp:send(Conn#connect.socket, Data) of
+		ok ->
+			{ok, Conn#connect{ seqnum = Conn#connect.seqnum + 1} };
+		{error, Reason} ->
+			{error, send_error, Reason}
+	end.
 
 
 %% part of mysql_init/4
@@ -218,11 +222,11 @@ do_query(Conn, Query) ->
     case do_send(Conn#connect{ seqnum = 0}, Packet) of
 	{ok, Conn2} ->
 	    get_query_response(Conn2);
-	{error, Reason} ->
+	{error, Code, Reason} ->
 	    Msg = io_lib:format("Failed sending data "
-			"on socket : ~p",
-			[Reason]),
-	    {error, Msg}
+			"on socket: ~w: ~p",
+			[Code, Reason]),
+	    {error, Code, Msg}
     end.
 
 do_queries(Conn, Queries) when not is_list(Queries) ->
@@ -250,7 +254,7 @@ do_queries(Conn, Queries) ->
 %% Descrip.: Wait for frames until we have a complete query response.
 %% Returns :   {data, #mysql_result}
 %%             {updated, #mysql_result}
-%%             {error, #mysql_result}
+%%             {error, Code, #mysql_result}
 %%           FieldInfo    = list() of term()
 %%           Rows         = list() of [string()]
 %%           AffectedRows = int()
@@ -269,8 +273,8 @@ get_query_response(Conn) ->
 		    {updated, Conn2,
 				#mysql_result{affectedrows=AffectedRows, insertid=InsertId}};
 		255 ->
-		    <<_Code:16/little, Message/binary>>  = Rest,
-		    {error, #mysql_result{error=Message}};
+		    <<Code:16/little, Message/binary>>  = Rest,
+		    {error, Code, #mysql_result{error=Message}};
 		_ ->
 		    %% Tabular data received
 		    case get_fields(Conn2, []) of
@@ -279,17 +283,17 @@ get_query_response(Conn) ->
 
 			    case get_rows(Fields, Conn3, []) of
 				{ok, Conn4, Rows} ->
-				?Log2((Conn#connect.log_fun), debug, "get_query_response. Rows: ~p~nConnect: ~p", [Rows, Conn4]),
+					?Log2((Conn#connect.log_fun), debug, "get_query_response. Rows: ~p~nConnect: ~p", [Rows, Conn4]),
 				    {data, Conn4, #mysql_result{fieldinfo=Fields, rows=Rows}};
-				{error, Reason} ->
-				    {error, #mysql_result{error=Reason}}
+				{error, Code, Reason} ->
+				    {error, Code, #mysql_result{error=Reason}}
 			    end;
-			{error, Reason} ->
-			    {error, #mysql_result{error=Reason}}
+			{error, Code, Reason} ->
+			    {error, Code, #mysql_result{error=Reason}}
 		    end
 	    end;
-	{error, Reason} ->
-	    {error, #mysql_result{error=Reason}}
+	{error, Code, Reason} ->
+	    {error, Code, #mysql_result{error=Reason}}
     end.
 
 %%--------------------------------------------------------------------
@@ -329,8 +333,7 @@ get_fields(Conn, Res) when Conn#connect.mysql_version == ?MYSQL_4_0 ->
 			    Type},
 		    get_fields(Conn2, [This | Res])
 	    end;
-	{error, Reason} ->
-	    {error, Reason}
+	Error -> Error
     end;
 %% Support for MySQL 4.1.x and 5.x:
 get_fields(Conn, Res) when Conn#connect.mysql_version == ?MYSQL_4_1 ->
@@ -362,8 +365,7 @@ get_fields(Conn, Res) when Conn#connect.mysql_version == ?MYSQL_4_1 ->
 			    get_field_datatype(Type)},
 		    get_fields(Conn2, [This | Res])
 	    end;
-	{error, Reason} ->
-	    {error, Reason}
+	Error -> Error
     end.
 
 %%--------------------------------------------------------------------
@@ -386,8 +388,7 @@ get_rows(Fields, Conn, Res) ->
 		    {ok, This} = get_row(Fields, Packet, []),
 		    get_rows(Fields, Conn2, [This | Res])
 	    end;
-	{error, Reason} ->
-	    {error, Reason}
+	Error -> Error
     end.
 
 %% part of get_rows/4
