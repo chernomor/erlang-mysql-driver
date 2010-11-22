@@ -13,12 +13,14 @@
 %%%-------------------------------------------------------------------
 -module(mysql_sync_auth).
 
+-include("mysql_conn.hrl").
+
 %%--------------------------------------------------------------------
 %% External exports (should only be used by the 'mysql_conn' module)
 %%--------------------------------------------------------------------
 -export([
-	 do_old_auth/7,
-	 do_new_auth/8
+	 do_old_auth/4,
+	 do_new_auth/5
 	]).
 
 %%--------------------------------------------------------------------
@@ -48,10 +50,10 @@
 %% Descrip.: Perform old-style MySQL authentication.
 %% Returns : result of mysql_conn:do_recv/3
 %%--------------------------------------------------------------------
-do_old_auth(Conn, User, Password, Salt1, LogFun) ->
+do_old_auth(Conn, User, Password, Salt1) ->
 	Auth = password_old(Password, Salt1),
 	Packet2 = make_auth(User, Auth),
-	Conn2 = do_send(Conn, Packet2, LogFun),
+	Conn2 = do_send(Conn, Packet2),
 	mysql_sync_conn:do_recv(Conn2).
 
 %%--------------------------------------------------------------------
@@ -66,22 +68,22 @@ do_old_auth(Conn, User, Password, Salt1, LogFun) ->
 %% Descrip.: Perform MySQL authentication.
 %% Returns : result of mysql_conn:do_recv/3
 %%--------------------------------------------------------------------
-do_new_auth(Conn, User, Password, Salt1, Salt2, LogFun) ->
+do_new_auth(Conn, User, Password, Salt1, Salt2) ->
 	Auth = password_new(Password, Salt1 ++ Salt2),
 	Packet2 = make_new_auth(User, Auth, none),
-	do_send(Conn, Packet2, SeqNum, LogFun),
-	case mysql_sync_conn:do_recv(LogFun, SeqNum) of
-	{ok, Packet3, SeqNum2} ->
+	Conn2 = do_send(Conn, Packet2),
+	case mysql_sync_conn:do_recv(Conn2) of
+	{error, unknown, Reason} ->
+		{error, unknown, Reason};
+	{ok, Conn3, Packet3} ->
 		case Packet3 of
 		<<254:8>> ->
 			AuthOld = password_old(Password, Salt1),
-			do_send(Sock, <<AuthOld/binary, 0:8>>, SeqNum2 + 1, LogFun),
-			mysql_sync_conn:do_recv(LogFun, SeqNum2 + 1);
+			Conn4 = do_send(Conn3, <<AuthOld/binary, 0:8>>),
+			mysql_sync_conn:do_recv(Conn4);
 		_ ->
-			{ok, Packet3, SeqNum2}
-		end;
-	{error, Reason} ->
-		{error, Reason}
+			{ok, Conn3, Packet3}
+		end
 	end.
 
 %%====================================================================
@@ -181,10 +183,10 @@ password_new(Password, Salt) ->
 	bxor_binary(Res, Stage1).
 
 
-do_send(Conn, Packet, LogFun) ->
-	LogFun(?MODULE, ?LINE, debug,
+do_send(Conn, Packet) ->
+	(Conn#connect.log_fun)(?MODULE, ?LINE, debug,
 	   fun() -> {"mysql_auth send packet ~p: ~p", [Conn#connect.seqnum, Packet]} end),
-	Data = <<(size(Packet)):24/little, Conn#connect.seqnum:8, Packet/binary>>,
+	Data = <<(size(Packet)):24/little, (Conn#connect.seqnum):8, Packet/binary>>,
 	gen_tcp:send(Conn#connect.socket, Data),
 	Conn#connect{ seqnum = Conn#connect.seqnum + 1}
 .
