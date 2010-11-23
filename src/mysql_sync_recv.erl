@@ -12,7 +12,7 @@
 	LogFun(?MODULE, ?LINE,Level,fun()-> {Msg,Params} end)).
 -define(L(Msg), io:format("~p:~b ~p ~n", [?MODULE, ?LINE, Msg])).
 
--define(RECV_TIMEOUT, 10000).
+-define(RECV_TIMEOUT, 60000).
 
 %%%	Packet :== {PacketData, Num}
 %%%
