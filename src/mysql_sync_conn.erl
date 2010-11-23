@@ -43,13 +43,21 @@ init(Host, Port, User, Password, Database, LogFun, Encoding) ->
 		{ok, Conn2} ->
 			Db = iolist_to_binary(Database),
 			case do_query(Conn2, <<"use ", Db/binary>>) of
-			{error, MySQLRes} ->
-				?Log2( (Conn#connect.log_fun), error,
+			{query_error, Conn3, Code, MySQLRes} ->
+				?Log2( (Conn3#connect.log_fun), error,
 				 "mysql_conn: Failed changing to database "
-				 "~p : ~p",
-				 [Database,
+				 "~p : (~w) ~p",
+				 [Database, Code,
 				  mysql:get_result_reason(MySQLRes)]),
-				{error, failed_changing_database};
+				{query_error, Conn3, Code, failed_changing_database};
+
+			{error, Code, MySQLRes} ->
+				?Log2( (Conn2#connect.log_fun), error,
+				 "mysql_conn: cannot select database "
+				 "~p : (~w) ~p",
+				 [Database, Code,
+				  mysql:get_result_reason(MySQLRes)]),
+				{error, Code, failed_changing_database};
 
 			%% ResultType: data | updated
 			{_ResultType, Conn3, _MySQLRes} ->
@@ -68,8 +76,8 @@ init(Host, Port, User, Password, Database, LogFun, Encoding) ->
 		end;
 	{error, Code, Msg} ->
 		?Log2(LogFun, error,
-		 "failed connecting to ~p:~p : ~p",
-		 [Host, Port, E]),
+		 "failed connecting to ~p:~p : (~w) ~p",
+		 [Host, Port, Code, Msg]),
 		{error, Code, Msg}
 	end.
 
@@ -274,7 +282,7 @@ get_query_response(Conn) ->
 				#mysql_result{affectedrows=AffectedRows, insertid=InsertId}};
 		255 ->
 		    <<Code:16/little, Message/binary>>  = Rest,
-		    {error, Code, #mysql_result{error=Message}};
+		    {query_error, Conn2, Code, #mysql_result{error=Message}};
 		_ ->
 		    %% Tabular data received
 		    case get_fields(Conn2, []) of
