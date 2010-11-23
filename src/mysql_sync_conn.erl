@@ -66,11 +66,11 @@ init(Host, Port, User, Password, Database, LogFun, Encoding) ->
 		{error, Code, Reason} ->
 			{error, Code, Reason}
 		end;
-	E ->
+	{error, Code, Msg} ->
 		?Log2(LogFun, error,
 		 "failed connecting to ~p:~p : ~p",
 		 [Host, Port, E]),
-		{error, connect_failed}
+		{error, Code, Msg}
 	end.
 
 %%--------------------------------------------------------------------

@@ -35,7 +35,7 @@ init(Host, Port, LogFun) ->
 				[Host, Port, E]}
 		   end),
 		Msg = lists:flatten(io_lib:format("connect failed : ~p", [E])),
-		{error, Msg}
+		{error, cannot_connect, Msg}
 	end
 .
 
@@ -61,7 +61,7 @@ read(State) ->
 						fun() ->
 						   { "read: Socket ~p closed : ~p", [Sock, Reason] }
 						end),
-					{error, Reason}
+					{error, connection_died, Reason}
 			end
 		end,
 	%LogFun(?MODULE, ?LINE, error,
@@ -93,8 +93,8 @@ get_packet(State) ->
 					"get_packet: not_enough_data, call ReadIter", []),
 
 			case ReadIter(State2) of
-				{error, Reason} ->
-					{error, not_enough_data, Reason};
+				{error, Code, Reason} ->
+					{error, Code, Reason};
 				State3 ->
 					get_packet( State3 )
 			end;
