@@ -12,6 +12,7 @@
 	LogFun(?MODULE, ?LINE,Level,fun()-> {Msg,Params} end)).
 -define(L(Msg), io:format("~p:~b ~p ~n", [?MODULE, ?LINE, Msg])).
 
+-define(RECV_TIMEOUT, 10000).
 
 %%%	Packet :== {PacketData, Num}
 %%%
@@ -47,7 +48,7 @@ read(State) ->
 	LogFun = State#connect.log_fun,
 	ReadIter = fun(IntState) ->
 			Sock = IntState#connect.socket,
-			case gen_tcp:recv(Sock, 0, 9000) of
+			case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
 				{ok, InData} ->
 					LogFun(?MODULE, ?LINE, debug,
 						fun() ->{
