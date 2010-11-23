@@ -3,7 +3,7 @@
 
 -include("mysql_conn.hrl").
 
--export([start_link/3, read/1, get_packet/1
+-export([start_link/3, read/1, get_packet/1, stop_link/1
 	]).
 
 -define(Log(LogFun,Level,Msg),
@@ -39,6 +39,8 @@ init(Host, Port, LogFun) ->
 	end
 .
 
+stop_link(Conn) ->
+	gen_tcp:close(Conn#connect.socket).
 
 %% return: #connect | {error, Reason}
 read(State) ->

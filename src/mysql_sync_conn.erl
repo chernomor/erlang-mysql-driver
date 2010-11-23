@@ -114,7 +114,7 @@ quit(Conn) ->
     Packet =  <<?MYSQL_QUIT_OP>>,
     case do_send(Conn#connect{ seqnum = 0}, Packet) of
 	{ok, Conn2} ->
-		{ok, Conn2};
+		mysql_sync_recv:stop_link(Conn2);
 	{error, Code, Reason} ->
 	    Msg = io_lib:format("Failed sending QUIT "
 				"on socket : ~p",
