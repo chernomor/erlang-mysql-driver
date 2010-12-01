@@ -6,7 +6,8 @@
 %%--------------------------------------------------------------------
 -export([init/7,
 	 fetch/2,
-	 quit/1
+	 quit/1,
+	 do_query_without_retrieve_rows/2
 	]).
 
 -export([do_recv/1
@@ -237,6 +238,20 @@ do_query(Conn, Query) ->
 	    {error, Code, Msg}
     end.
 
+do_query_without_retrieve_rows(Conn, Query) ->
+    Query1 = iolist_to_binary(Query),
+    ?Log2((Conn#connect.log_fun), debug, "fetch ~p", [Query1]),
+    Packet =  <<?MYSQL_QUERY_OP, Query1/binary>>,
+    case do_send(Conn#connect{ seqnum = 0}, Packet) of
+	{ok, Conn2} ->
+	    get_query_response_without_retrieve_rows(Conn2);
+	{error, Code, Reason} ->
+	    Msg = io_lib:format("Failed sending data "
+			"on socket: ~w: ~p",
+			[Code, Reason]),
+	    {error, Code, Msg}
+    end.
+
 do_queries(Conn, Queries) when not is_list(Queries) ->
 	do_query(Conn, Queries);
 
@@ -293,6 +308,40 @@ get_query_response(Conn) ->
 				{ok, Conn4, Rows} ->
 					?Log2((Conn#connect.log_fun), debug, "get_query_response. Rows: ~p~nConnect: ~p", [Rows, Conn4]),
 				    {data, Conn4, #mysql_result{fieldinfo=Fields, rows=Rows}};
+				{error, Code, Reason} ->
+				    {error, Code, #mysql_result{error=Reason}}
+			    end;
+			{error, Code, Reason} ->
+			    {error, Code, #mysql_result{error=Reason}}
+		    end
+	    end;
+	{error, Code, Reason} ->
+	    {error, Code, #mysql_result{error=Reason}}
+    end.
+
+get_query_response_without_retrieve_rows(Conn) ->
+    ?Log2((Conn#connect.log_fun), debug, "get_query_response. connect: ~p", [Conn]),
+    case do_recv(Conn) of
+	{ok, Conn2, Packet} ->
+	    {Fieldcount, Rest} = get_lcb(Packet),
+	    case Fieldcount of
+		0 ->
+		    %% No Tabular data
+		    {AffectedRows, Rest2} = get_lcb(Rest),
+		    {InsertId, _} = get_lcb(Rest2),
+		    {updated, Conn2,
+				#mysql_result{affectedrows=AffectedRows, insertid=InsertId}};
+		255 ->
+		    <<Code:16/little, Message/binary>>  = Rest,
+		    {query_error, Conn2, Code, #mysql_result{error=Message}};
+		_ ->
+		    %% Tabular data received
+		    case get_fields(Conn2, []) of
+			{ok, Conn3, Fields} ->
+			    case retrieve_rows(Fields, Conn3) of
+				{ok, Conn4} ->
+					{empty_data, Conn4};
+				    %{data, Conn4, #mysql_result{fieldinfo=Fields, rows=Rows}};
 				{error, Code, Reason} ->
 				    {error, Code, #mysql_result{error=Reason}}
 			    end;
@@ -395,6 +444,20 @@ get_rows(Fields, Conn, Res) ->
 		_ ->
 		    {ok, This} = get_row(Fields, Packet, []),
 		    get_rows(Fields, Conn2, [This | Res])
+	    end;
+	Error -> Error
+    end.
+
+% retrieve but do not return rows
+retrieve_rows(Fields, Conn) ->
+    case do_recv(Conn) of
+	{ok, Conn2, Packet} ->
+	    case Packet of
+		<<254:8, Rest/binary>> when size(Rest) < 8 ->
+		    {ok, Conn2};
+		_ ->
+		    {ok, _This} = get_row(Fields, Packet, []),
+		    retrieve_rows(Fields, Conn2)
 	    end;
 	Error -> Error
     end.
