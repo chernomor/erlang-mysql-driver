@@ -238,7 +238,7 @@ do_query(Conn, Query) ->
 	    {error, Code, Msg}
     end.
 
-do_query_without_retrieve_rows(Conn, Query) ->
+do_query_without_retrieve_rows(Conn, Query) when is_record(Conn, connect) ->
     Query1 = iolist_to_binary(Query),
     ?Log2((Conn#connect.log_fun), debug, "fetch ~p", [Query1]),
     Packet =  <<?MYSQL_QUERY_OP, Query1/binary>>,
@@ -250,7 +250,9 @@ do_query_without_retrieve_rows(Conn, Query) ->
 			"on socket: ~w: ~p",
 			[Code, Reason]),
 	    {error, Code, Msg}
-    end.
+    end;
+do_query_without_retrieve_rows(Conn, _Query) ->
+	exit(io_lib:format("[~w] Conn is not record #connect: ~p~n", [self(), Conn])).
 
 do_queries(Conn, Queries) when not is_list(Queries) ->
 	do_query(Conn, Queries);
