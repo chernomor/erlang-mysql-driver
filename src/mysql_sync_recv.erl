@@ -3,7 +3,7 @@
 
 -include("mysql_conn.hrl").
 
--export([start_link/3, read/1, get_packet/1, stop_link/1
+-export([start_link/4, read/1, get_packet/1, stop_link/1
 	]).
 
 -define(Log(LogFun,Level,Msg),
@@ -12,23 +12,25 @@
 	LogFun(?MODULE, ?LINE,Level,fun()-> {Msg,Params} end)).
 -define(L(Msg), io:format("~p:~b ~p ~n", [?MODULE, ?LINE, Msg])).
 
--define(RECV_TIMEOUT, 600000).
-
 %%%	Packet :== {PacketData, Num}
 %%%
 
 
-start_link(Host, Port, LogFun)
+start_link(Host, Port, LogFun, RecvTimeout)
 	when is_list(Host), is_integer(Port); is_tuple(Host), is_integer(Port) ->
 
-   init(Host, Port, LogFun)
+   init(Host, Port, LogFun, RecvTimeout)
 .
 
 %% return: {ok, #connect}
-init(Host, Port, LogFun) ->
+init(Host, Port, LogFun, RecvTimeout) ->
 	case gen_tcp:connect(Host, Port, [binary, {packet, 0}, {active, false} ]) of
 	{ok, Sock} ->
-		{ok, read(#connect{socket  = Sock, log_fun = LogFun })};
+		{ok, read(#connect{
+			socket  = Sock,
+			log_fun = LogFun,
+			recv_timeout = RecvTimeout
+		})};
 	E ->
 		LogFun(?MODULE, ?LINE, error,
 		   fun() ->
@@ -48,15 +50,28 @@ read(State) ->
 	LogFun = State#connect.log_fun,
 	ReadIter = fun(IntState) ->
 			Sock = IntState#connect.socket,
-			case gen_tcp:recv(Sock, 0, ?RECV_TIMEOUT) of
+			Rez = gen_tcp:recv(Sock, 0, IntState#connect.recv_timeout),
+
+			% calculate wait_time only for first packet
+			IntState2 = case IntState#connect.query_started of
+				0 -> IntState;
+				_ ->
+					IntState#connect {
+						wait_time = timer:now_diff(erlang:now(),
+							IntState#connect.query_started),
+						query_started = 0
+					}
+			end,
+
+			case Rez of
 				{ok, InData} ->
 					LogFun(?MODULE, ?LINE, debug,
 						fun() ->{
 						   "read: Read from Socket:~n  '~s'~n  (~p)",
 						   [InData, InData]
 						} end),
-					read( IntState#connect{
-						buf = <<(IntState#connect.buf)/bytes, InData/bytes>>
+					read( IntState2#connect{
+						buf = <<(IntState2#connect.buf)/bytes, InData/bytes>>
 					});
 
 				{error, Reason} ->
@@ -66,7 +81,8 @@ read(State) ->
 						end),
 					{error, connection_died, Reason}
 			end
-		end,
+		end, % ~ ReadIter = fun(IntState)
+
 	%LogFun(?MODULE, ?LINE, error,
 	%	fun() -> {
 	%		"read called. buf: '~s' (~p)", [State#connect.buf, State#connect.buf]

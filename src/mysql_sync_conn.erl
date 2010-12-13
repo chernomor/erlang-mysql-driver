@@ -33,11 +33,15 @@
 	LogFun(?MODULE, ?LINE,Level,fun()-> {Msg,Params} end)).
 -define(L(Msg), io:format("~p:~b ~p ~n", [?MODULE, ?LINE, Msg])).
 
+-define(RECV_TIMEOUT, 600000).
 
 %%%	Conn :== mysql_sync_recv:#state
 
 init(Host, Port, User, Password, Database, LogFun, Encoding) ->
-	case mysql_sync_recv:start_link(Host, Port, LogFun) of
+	init(Host, Port, User, Password, Database, LogFun, Encoding, ?RECV_TIMEOUT).
+
+init(Host, Port, User, Password, Database, LogFun, Encoding, Timeout) ->
+	case mysql_sync_recv:start_link(Host, Port, LogFun, Timeout) of
 	{ok, Conn} ->
 		%io:format("init:Connect: ~p~n", [Conn]),
 		case mysql_init(Conn, User, Password) of
@@ -190,7 +194,8 @@ do_send(Conn, Packet) when is_binary(Packet) ->
     Data = <<(size(Packet)):24/little, (Conn#connect.seqnum):8, Packet/binary>>,
     case gen_tcp:send(Conn#connect.socket, Data) of
 		ok ->
-			{ok, Conn#connect{ seqnum = Conn#connect.seqnum + 1} };
+			{ok, Conn#connect{ seqnum = Conn#connect.seqnum + 1,
+				query_started = erlang:now() } };
 		{error, Reason} ->
 			{error, send_error, Reason}
 	end.
